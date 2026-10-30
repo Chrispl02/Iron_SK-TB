@@ -1,4 +1,22 @@
 import json
+import numpy as np 
+import math
+import sympy as sp
+from crystal import *
+
+ORBITAL_MAP = {
+    "s": 0,
+    "x": 1, "y": 2, "z": 3,
+    "xy": 4, "yz": 5, "xz": 6,
+    "d1": 7,  # d_x2-y2
+    "d2": 8   # d_3z2-r2
+}
+
+ORBITAL_NUM = {
+    0:"s",
+    1: "x",2:"y",3:"z",
+    4:"xy",5:"yz",6:"xz",7:"d1",8:"d2"}
+
 
 def load(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -27,7 +45,10 @@ def get_param(data, basis_type, category, neighbor, key):
             
     raise ValueError(f"Parameter '{key}' not found.")
 
-import sympy as sp
+
+    
+
+
 
 class SlaterKoster:
     def __init__(self):
@@ -111,7 +132,51 @@ class SlaterKoster:
         expr = self.table[pair]
         return expr.subs({self.l: l_val, self.m: m_val, self.n: n_val})
 
+    def get_all_equations(self, l_val, m_val, n_val):
+        result = {}
+        for (orb1, orb2), expr in self.table.items():
+            result[(orb1, orb2)] = expr.subs({self.l: l_val, self.m: m_val, self.n: n_val})
+        return result
         
+
+class Hamiltonian(SlaterKoster):
+    def __init__(self):
+        self.sk = SlaterKoster()
+
+    def on_site():
+        return 0
+
+
+    def first_NN():
+        return 0
+
+
+
+
+
 if __name__ == "__main__":
     data = load("data/SK_2-CP_Fe_bcc_up.json")
+
+    sk = SlaterKoster()
+    
+    l_val, m_val , n_val = direction_cosines(pos=[2,0,0],  sym = False)
+
+    tabla = sk.get_all_equations(l_val, m_val, n_val)
+
+    # To check that we are obtaining the same results that Papaconstatinopolous section 1.4
+    '''
+    for par, eq in tabla.items():
+        eq_simplificada = sp.simplify(eq)
+        #print(f"{par[0]}-{par[1]}: {eq}")
+        print(f"{par[0]}-{par[1]}")
+        sp.pprint(eq_simplificada)'''
+
+    a = 5.40570 # a.u.
+    a = au_to_angstrom(a)
+    crystal = Crystal(structure="bcc", a=a, NN = 3)
+    crystal.build_NN()
+
+    print("pos")
+    print(crystal.pos)
+
     print( get_param(data, "orthogonal","onsite",None,"p") )
