@@ -21,6 +21,8 @@ global ORBITAL
 ORBITAL = {'s': 0, 'x': 1, 'y': 2, 'z': 3, 
             'xy': 4, 'yz': 5, 'zx': 6, 'x2-y2': 7, '3z2-r2': 8}
 
+def ry_to_eV(x):
+    return x * 13.6057
 
 def load(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -145,6 +147,7 @@ class SlaterKoster:
 # No spin option is not proved
 class Hamiltonian(SlaterKoster):
     def __init__(self,crystal_pos, spin = False):
+        super().__init__()
         self.sk = SlaterKoster()
         self.crystal = crystal_pos
         self.spin = spin
@@ -152,14 +155,11 @@ class Hamiltonian(SlaterKoster):
         # Assume H 9x9 (structure until d orbital)
         if spin == True:
             self.H_on_site = np.zeros([2,9,9])
-            self.H_first_NN = np.zeros([2,9,9])
-            self.H_second_NN = np.zeros([2,9,9])
-            self.H_third_NN = np.zeros([2,9,9])
+            self.H_R_up = {}
+            self.H_R_dn = {}
         else: # spin False
             self.H_on_site = np.zeros([9,9])
-            self.H_first_NN = np.zeros([9,9])
-            self.H_second_NN = np.zeros([9,9])
-            self.H_third_NN = np.zeros([9,9])
+            self.H_R = {}
 
     def load_param(self, data):
         if self.spin == True:
@@ -173,25 +173,16 @@ class Hamiltonian(SlaterKoster):
         category = "onsite"
         
         if self.spin:
-            e_s_up = dict(self.param_up[self.basis][category])['s']
-            e_p_up = dict(self.param_up[self.basis][category])['p']
-            e_d1_up = dict(self.param_up[self.basis][category])['d1']
-            e_d2_up = dict(self.param_up[self.basis][category])['d2']
+            for s_idx, p_data in enumerate([self.param_up, self.param_dn]):
+                e_s = dict(p_data[self.basis][category])['s']
+                e_p = dict(p_data[self.basis][category])['p']
+                e_d1 = dict(p_data[self.basis][category])['d1']
+                e_d2 = dict(p_data[self.basis][category])['d2']
 
-            self.H_on_site[0, 0, 0] = e_s_up
-            for i in range(1, 4): self.H_on_site[0, i, i] = e_p_up
-            for i in range(4, 7): self.H_on_site[0, i, i] = e_d1_up
-            for i in range(7, 9): self.H_on_site[0, i, i] = e_d2_up
-
-            e_s_dn = dict(self.param_dn[self.basis][category])['s']
-            e_p_dn = dict(self.param_dn[self.basis][category])['p']
-            e_d1_dn = dict(self.param_dn[self.basis][category])['d1']
-            e_d2_dn = dict(self.param_dn[self.basis][category])['d2']
-
-            self.H_on_site[1, 0, 0] = e_s_dn
-            for i in range(1, 4): self.H_on_site[1, i, i] = e_p_dn
-            for i in range(4, 7): self.H_on_site[1, i, i] = e_d1_dn
-            for i in range(7, 9): self.H_on_site[1, i, i] = e_d2_dn
+                self.H_on_site[s_idx, 0, 0] = e_s
+                for i in range(1, 4): self.H_on_site[s_idx, i, i] = e_p
+                for i in range(4, 7): self.H_on_site[s_idx, i, i] = e_d1
+                for i in range(7, 9): self.H_on_site[s_idx, i, i] = e_d2
             
         else:
 
@@ -205,88 +196,146 @@ class Hamiltonian(SlaterKoster):
             for i in range(4, 7): self.H_on_site[i, i] = e_d1
             for i in range(7, 9): self.H_on_site[i, i] = e_d2
 
+    def _build_neighbor(self, category_name, crystal_key):
+        # To construct hamiltonian for a given a N neighbord
+
+        parameters_up = dict(self.param_up[self.basis]['hopping'][category_name])
+        if self.spin:
+            parameters_dn = dict(self.param_dn[self.basis]['hopping'][category_name])
+
+        sum_H_up = np.zeros([9, 9])
+        sum_H_dn = np.zeros([9, 9])
+        if self.spin:
+                H_R_dn = np.zeros([9, 9])
+        for pos in self.crystal[crystal_key]:
+            l_val, m_val, n_val = direction_cosines(pos=pos)
+            table = self.get_all_equations(l_val, m_val, n_val)
+            
+            H_R_up = np.zeros([9, 9])
+            if self.spin:
+                H_R_dn = np.zeros([9, 9])
+
+            for (orb1, orb2), expr in table.items():
+                i = ORBITAL[orb1]
+                j = ORBITAL[orb2]
+
+                val_up = float(expr.subs(parameters_up))
+                H_R_up[i, j] = val_up
+                if i != j:
+                    H_R_up[j, i] = val_up
+
+                if self.spin:
+                    val_dn = float(expr.subs(parameters_dn))
+                    H_R_dn[i, j] = val_dn
+                    if i != j:
+                        H_R_dn[j, i] = val_dn
+
+            if self.spin:
+                self.H_R_up[tuple(pos)] = H_R_up
+                self.H_R_dn[tuple(pos)] = H_R_dn
+                sum_H_up += H_R_up
+                sum_H_dn += H_R_dn
+            else:
+                self.H_R[tuple(pos)] = H_R_up
+                sum_H_up += H_R_up
+
+        if self.spin:
+            return sum_H_up, sum_H_dn
+        else:
+            return sum_H_up
+
+
 
     def first_NN(self):
-        category = "first_neighbor"
-        parameters_up = dict(self.param_up[self.basis]['hopping'][category])
-        parameters_dn = dict(self.param_dn[self.basis]['hopping'][category])
-
-        # self.table = self.sk.get_all_equations(l_val, m_val, n_val)
-        for pos in self.crystal["first_NN"]:
-            # pos is an array
-            l_val, m_val , n_val = direction_cosines(pos=pos)
-            table = self.sk.get_all_equations(l_val, m_val, n_val)
-            # table[('s', 's')] -> <class 'sympy.core.symbol.Symbol'>
-            for (orb1, orb2), expr in table.items():
-                i = ORBITAL[orb1]
-                j = ORBITAL[orb2]
-
-                # subs to replace symbols
-                val_up = float(expr.subs(parameters_up))
-                val_dn = float(expr.subs(parameters_dn))
-                self.H_first_NN[0,i,j] = val_up
-                self.H_first_NN[1,i,j] = val_dn
-
-                # by hermicity (check expections!)
-                if i != j:
-                    self.H_first_NN[0,j,i] = val_up
-                    self.H_first_NN[1,j,i] = val_dn
+        return self._build_neighbor("first_neighbor", "first_NN")
 
     def second_NN(self):
-        category = "second_neighbor"
-        parameters_up = dict(self.param_up[self.basis]['hopping'][category])
-        parameters_dn = dict(self.param_dn[self.basis]['hopping'][category])
-
-        # self.table = self.sk.get_all_equations(l_val, m_val, n_val)
-        for pos in self.crystal["second_NN"]:
-            # pos is an array
-            l_val, m_val , n_val = direction_cosines(pos=pos)
-            table = self.sk.get_all_equations(l_val, m_val, n_val)
-            # table[('s', 's')] -> <class 'sympy.core.symbol.Symbol'>
-            for (orb1, orb2), expr in table.items():
-                i = ORBITAL[orb1]
-                j = ORBITAL[orb2]
-
-                # subs to replace symbols
-                val_up = float(expr.subs(parameters_up))
-                val_dn = float(expr.subs(parameters_dn))
-                self.H_second_NN[0,i,j] = val_up
-                self.H_second_NN[1,i,j] = val_dn
-
-                # by hermicity (check expections!)
-                if i != j:
-                    self.H_second_NN[0,j,i] = val_up
-                    self.H_second_NN[1,j,i] = val_dn
+        return self._build_neighbor("second_neighbor", "second_NN")
 
     def third_NN(self):
-        category = "third_neighbor"
-        parameters_up = dict(self.param_up[self.basis]['hopping'][category])
-        parameters_dn = dict(self.param_dn[self.basis]['hopping'][category])
+        return self._build_neighbor("third_neighbor", "third_NN")
 
-        # self.table = self.sk.get_all_equations(l_val, m_val, n_val)
-        for pos in self.crystal["third_NN"]:
-            # pos is an array
-            l_val, m_val , n_val = direction_cosines(pos=pos)
-            table = self.sk.get_all_equations(l_val, m_val, n_val)
-            # table[('s', 's')] -> <class 'sympy.core.symbol.Symbol'>
-            for (orb1, orb2), expr in table.items():
-                i = ORBITAL[orb1]
-                j = ORBITAL[orb2]
+    def build_H_k(self, k_vec):
+        # To apply bloch sum
+        if self.spin:
+            # On site
+            H_k_up = np.array(self.H_on_site[0], dtype=complex)
+            H_k_dn = np.array(self.H_on_site[1], dtype=complex)
+            # + Neighbors
+            for pos_tuple, H_R in self.H_R_up.items():
+                phase = np.exp(1j * np.dot(k_vec, pos_tuple))
+                H_k_up += phase * H_R
+                
+            for pos_tuple, H_R in self.H_R_dn.items():
+                phase = np.exp(1j * np.dot(k_vec, pos_tuple))
+                H_k_dn += phase * H_R
 
-                # subs to replace symbols
-                val_up = float(expr.subs(parameters_up))
-                val_dn = float(expr.subs(parameters_dn))
-                self.H_third_NN[0,i,j] = val_up
-                self.H_third_NN[1,i,j] = val_dn
-
-                # by hermicity (check expections!)
-                if i != j:
-                    self.H_third_NN[0,j,i] = val_up
-                    self.H_third_NN[1,j,i] = val_dn
-
-
+            return H_k_up, H_k_dn
+        
+        else:
+            H_k = np.array(self.H_on_site, dtype=complex)
+            
+            for pos_tuple, H_R in self.H_R.items():
+                phase = np.exp(1j * np.dot(k_vec, pos_tuple))
+                H_k += phase * H_R
+                
+            return H_k
 
 
+    def calculate_bands(self, k_path):
+        # solve the secular equation for a k path
+        num_k = len(k_path)
+        
+        if self.spin:
+            energies_up = np.zeros((num_k, 9))
+            energies_dn = np.zeros((num_k, 9))
+            
+            for i, k_vec in enumerate(k_path):
+                H_k_up, H_k_dn = self.build_H_k(k_vec)
+                # return eigenvalues for each hamiltonian
+                energies_up[i, :] = np.linalg.eigh(H_k_up)[0]
+                energies_dn[i, :] = np.linalg.eigh(H_k_dn)[0]
+                
+            return energies_up, energies_dn
+        
+        else:
+            energies = np.zeros((num_k, 9))
+            
+            for i, k_vec in enumerate(k_path):
+                H_k = self.build_H_k(k_vec)
+                energies[i, :] = np.linalg.eigh(H_k)[0]
+                
+            return energies
+
+
+def fast_band_plot(energies_up, energies_dn, k_path, k_points):
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(8, 6))
+
+
+    for i in range(9):
+        label_up = 'Spin Up' if i == 0 else ""
+        label_dn = 'Spin Down' if i == 0 else ""
+        
+        plt.plot(energies_up[:, i], color='blue', linestyle='-', label=label_up)
+        plt.plot(energies_dn[:, i], color='red', linestyle='--', label=label_dn)
+
+    nodos_idx = [0, k_points, 2 * k_points, 3 * k_points, len(k_path) - 1]
+    etiquetas = ['$\Gamma$', 'H', 'N', '$\Gamma$', 'P']
+
+    for idx in nodos_idx:
+        plt.axvline(x=idx, color='black', linewidth=0.8, linestyle=':')
+
+    plt.xticks(nodos_idx, etiquetas, fontsize=12)
+    plt.ylabel("Energy (eV)", fontsize=12)
+    plt.xlim(0, len(k_path) - 1)
+    # plt.ylim(-1.5, 2.0) # 
+    plt.title("Band Structure", fontsize=14)
+    plt.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     data = load("data/SK_2-CP_Fe_bcc_up.json")
@@ -324,4 +373,27 @@ if __name__ == "__main__":
     H.second_NN()
     H.third_NN()
 
-    print( get_param(data, "orthogonal","onsite",None,"p") )
+    # Debug with high symmetry points
+    factor = 2 * np.pi / a
+    Gamma = np.array([0.0, 0.0, 0.0]) * factor
+    H_pt  = np.array([0.0, 1.0, 0.0]) * factor
+    N     = np.array([0.5, 0.5, 0.0]) * factor
+    P     = np.array([0.5, 0.5, 0.5]) * factor
+
+    path_nodes = [Gamma, H_pt, N, Gamma, P]
+    k_points = 40
+    k_path = []
+
+    for i in range(len(path_nodes) - 1):
+        segment = np.linspace(path_nodes[i], path_nodes[i+1], k_points, endpoint=(i == len(path_nodes) - 2))
+        k_path.append(segment)
+
+    k_path = np.vstack(k_path)
+
+    energies_up, energies_dn = H.calculate_bands(k_path)
+    
+    energies_up = ry_to_eV(energies_up)
+    energies_dn = ry_to_eV(energies_dn)
+
+    fast_band_plot(energies_up, energies_dn, k_path, k_points)
+    print(f"Forma de las bandas up: {energies_up.shape}")
