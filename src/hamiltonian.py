@@ -17,6 +17,10 @@ ORBITAL_NUM = {
     1: "x",2:"y",3:"z",
     4:"xy",5:"yz",6:"xz",7:"d1",8:"d2"}
 
+global ORBITAL
+ORBITAL = {'s': 0, 'x': 1, 'y': 2, 'z': 3, 
+            'xy': 4, 'yz': 5, 'zx': 6, 'x2-y2': 7, '3z2-r2': 8}
+
 
 def load(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -138,17 +142,147 @@ class SlaterKoster:
             result[(orb1, orb2)] = expr.subs({self.l: l_val, self.m: m_val, self.n: n_val})
         return result
         
-
+# No spin option is not proved
 class Hamiltonian(SlaterKoster):
-    def __init__(self):
+    def __init__(self,crystal_pos, spin = False):
         self.sk = SlaterKoster()
+        self.crystal = crystal_pos
+        self.spin = spin
+        self.basis = "orthogonal"
+        # Assume H 9x9 (structure until d orbital)
+        if spin == True:
+            self.H_on_site = np.zeros([2,9,9])
+            self.H_first_NN = np.zeros([2,9,9])
+            self.H_second_NN = np.zeros([2,9,9])
+            self.H_third_NN = np.zeros([2,9,9])
+        else: # spin False
+            self.H_on_site = np.zeros([9,9])
+            self.H_first_NN = np.zeros([9,9])
+            self.H_second_NN = np.zeros([9,9])
+            self.H_third_NN = np.zeros([9,9])
 
-    def on_site():
-        return 0
+    def load_param(self, data):
+        if self.spin == True:
+            self.param_up = load(data[0])
+            self.param_dn = load(data[1])
+        else:
+            self.param = load(data)
 
 
-    def first_NN():
-        return 0
+    def on_site(self):
+        category = "onsite"
+        
+        if self.spin:
+            e_s_up = dict(self.param_up[self.basis][category])['s']
+            e_p_up = dict(self.param_up[self.basis][category])['p']
+            e_d1_up = dict(self.param_up[self.basis][category])['d1']
+            e_d2_up = dict(self.param_up[self.basis][category])['d2']
+
+            self.H_on_site[0, 0, 0] = e_s_up
+            for i in range(1, 4): self.H_on_site[0, i, i] = e_p_up
+            for i in range(4, 7): self.H_on_site[0, i, i] = e_d1_up
+            for i in range(7, 9): self.H_on_site[0, i, i] = e_d2_up
+
+            e_s_dn = dict(self.param_dn[self.basis][category])['s']
+            e_p_dn = dict(self.param_dn[self.basis][category])['p']
+            e_d1_dn = dict(self.param_dn[self.basis][category])['d1']
+            e_d2_dn = dict(self.param_dn[self.basis][category])['d2']
+
+            self.H_on_site[1, 0, 0] = e_s_dn
+            for i in range(1, 4): self.H_on_site[1, i, i] = e_p_dn
+            for i in range(4, 7): self.H_on_site[1, i, i] = e_d1_dn
+            for i in range(7, 9): self.H_on_site[1, i, i] = e_d2_dn
+            
+        else:
+
+            e_s = dict(self.param_up[self.basis][category])['s']
+            e_p = dict(self.param_up[self.basis][category])['p']
+            e_d1 = dict(self.param_up[self.basis][category])['d1']
+            e_d2 = dict(self.param_up[self.basis][category])['d2']
+
+            self.H_on_site[0, 0] = e_s
+            for i in range(1, 4): self.H_on_site[i, i] = e_p
+            for i in range(4, 7): self.H_on_site[i, i] = e_d1
+            for i in range(7, 9): self.H_on_site[i, i] = e_d2
+
+
+    def first_NN(self):
+        category = "first_neighbor"
+        parameters_up = dict(self.param_up[self.basis]['hopping'][category])
+        parameters_dn = dict(self.param_dn[self.basis]['hopping'][category])
+
+        # self.table = self.sk.get_all_equations(l_val, m_val, n_val)
+        for pos in self.crystal["first_NN"]:
+            # pos is an array
+            l_val, m_val , n_val = direction_cosines(pos=pos)
+            table = self.sk.get_all_equations(l_val, m_val, n_val)
+            # table[('s', 's')] -> <class 'sympy.core.symbol.Symbol'>
+            for (orb1, orb2), expr in table.items():
+                i = ORBITAL[orb1]
+                j = ORBITAL[orb2]
+
+                # subs to replace symbols
+                val_up = float(expr.subs(parameters_up))
+                val_dn = float(expr.subs(parameters_dn))
+                self.H_first_NN[0,i,j] = val_up
+                self.H_first_NN[1,i,j] = val_dn
+
+                # by hermicity (check expections!)
+                if i != j:
+                    self.H_first_NN[0,j,i] = val_up
+                    self.H_first_NN[1,j,i] = val_dn
+
+    def second_NN(self):
+        category = "second_neighbor"
+        parameters_up = dict(self.param_up[self.basis]['hopping'][category])
+        parameters_dn = dict(self.param_dn[self.basis]['hopping'][category])
+
+        # self.table = self.sk.get_all_equations(l_val, m_val, n_val)
+        for pos in self.crystal["second_NN"]:
+            # pos is an array
+            l_val, m_val , n_val = direction_cosines(pos=pos)
+            table = self.sk.get_all_equations(l_val, m_val, n_val)
+            # table[('s', 's')] -> <class 'sympy.core.symbol.Symbol'>
+            for (orb1, orb2), expr in table.items():
+                i = ORBITAL[orb1]
+                j = ORBITAL[orb2]
+
+                # subs to replace symbols
+                val_up = float(expr.subs(parameters_up))
+                val_dn = float(expr.subs(parameters_dn))
+                self.H_second_NN[0,i,j] = val_up
+                self.H_second_NN[1,i,j] = val_dn
+
+                # by hermicity (check expections!)
+                if i != j:
+                    self.H_second_NN[0,j,i] = val_up
+                    self.H_second_NN[1,j,i] = val_dn
+
+    def third_NN(self):
+        category = "third_neighbor"
+        parameters_up = dict(self.param_up[self.basis]['hopping'][category])
+        parameters_dn = dict(self.param_dn[self.basis]['hopping'][category])
+
+        # self.table = self.sk.get_all_equations(l_val, m_val, n_val)
+        for pos in self.crystal["third_NN"]:
+            # pos is an array
+            l_val, m_val , n_val = direction_cosines(pos=pos)
+            table = self.sk.get_all_equations(l_val, m_val, n_val)
+            # table[('s', 's')] -> <class 'sympy.core.symbol.Symbol'>
+            for (orb1, orb2), expr in table.items():
+                i = ORBITAL[orb1]
+                j = ORBITAL[orb2]
+
+                # subs to replace symbols
+                val_up = float(expr.subs(parameters_up))
+                val_dn = float(expr.subs(parameters_dn))
+                self.H_third_NN[0,i,j] = val_up
+                self.H_third_NN[1,i,j] = val_dn
+
+                # by hermicity (check expections!)
+                if i != j:
+                    self.H_third_NN[0,j,i] = val_up
+                    self.H_third_NN[1,j,i] = val_dn
 
 
 
@@ -171,6 +305,7 @@ if __name__ == "__main__":
         print(f"{par[0]}-{par[1]}")
         sp.pprint(eq_simplificada)'''
 
+    # lattice parameter hardcoded
     a = 5.40570 # a.u.
     a = au_to_angstrom(a)
     crystal = Crystal(structure="bcc", a=a, NN = 3)
@@ -178,5 +313,15 @@ if __name__ == "__main__":
 
     print("pos")
     print(crystal.pos)
+
+    data = ["data/SK_2-CP_Fe_bcc_up.json", # up data
+            "data/SK_2-CP_Fe_bcc_dn.json"] # dn data
+
+    H = Hamiltonian(crystal.pos, spin = True)
+    H.load_param(data)
+    H.on_site()
+    H.first_NN()
+    H.second_NN()
+    H.third_NN()
 
     print( get_param(data, "orthogonal","onsite",None,"p") )
