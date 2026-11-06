@@ -68,7 +68,7 @@ class Crystal():
 
         # chequeo: 6 tetraedros por punto de la malla completa
         assert tet[:, 4].sum() == 6 * self.k_irr_mult.sum()
-        
+
     # --- Plotting functions ---
 
     def plot_3d(self):
@@ -170,7 +170,9 @@ class Crystal():
             ax.text(*k, f" {name}")
         # Plot irreducible k-points of spts.txt -> Given kpoints
         if kpoints == True:
+            print("self.b_vec", self.b_vec)
             for i,k in enumerate(self.k_irr_cart):
+                print(i,": ", k)
                 ax.scatter(*k, color="blue")
                 ax.text(*k, f" {i}")
         # Plot irreducible k-points of spts.txt -> Given kpoints
@@ -185,7 +187,7 @@ class Crystal():
         plt.tight_layout()
         plt.show()
 
-    # ---------- experiments about creating the mesh ----------
+    # ---------- Experimental: about creating the mesh ----------
     def build_kmesh(self, N):
         """Mesh centred in Gamma"""
         N = (N, N, N) if isinstance(N, int) else tuple(N)
@@ -240,7 +242,7 @@ if __name__ == "__main__":
     crystal.build_BZ()
     crystal.build_kmesh(6) #24
     crystal.build_tetrahedra()
-    crystal.load_irreducible_mesh("data/spts_bcc.txt", "data/tetra_bcc.txt")
+    crystal.load_irreducible_mesh("data/spts_bcc_v2.txt", "data/tetra_bcc.txt")
 
     
-    crystal.plot_BZ(kpoints = True, kmesh = True)
+    crystal.plot_BZ(kpoints = True, kmesh = False)
