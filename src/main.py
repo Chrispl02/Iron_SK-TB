@@ -3,6 +3,7 @@ import numpy as np
 from crystal import *
 from hamiltonian import *
 from dos import *
+from fermi import *
 from scipy.optimize import brentq
 
 
@@ -118,3 +119,13 @@ plot_dos(Egrid, g_up, g_dn, E_F)
 
 
 # Calculate Fermi surface 
+crystal.build_BZ()                       # para b_vec y bz_faces
+surf = fermi_surface(H, crystal, E_F)    # E_F en eV, del bisect de la DoS
+print(sorted(surf))                      # qué bandas cruzan E_F, por espín
+
+#plot_fermi_surface(surf, crystal, spin="up", bands=[4])   # una banda
+plot_fermi_surface(surf, crystal, spin="up") 
+plot_fermi_surface(surf, crystal, spin="dn")
+plt.show()
+
+write_bxsf("fe_bcc", H, crystal, E_F, N=40)

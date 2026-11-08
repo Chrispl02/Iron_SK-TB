@@ -137,7 +137,7 @@ class Crystal():
                 faces.append(order_face(vor.vertices[rv], normal))
         self.bz_faces = faces
 
-        # chequeo: bcc -> dodecaedro rómbico (14 vértices, 12 caras)
+        # check: for bcc
         assert np.isclose(ConvexHull(self.bz_vertices).volume, self.bz_volume)
 
     

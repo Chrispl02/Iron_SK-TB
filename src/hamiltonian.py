@@ -307,6 +307,20 @@ class Hamiltonian(SlaterKoster):
                 
             return energies
 
+    def eigvals_batch(self, k_arr, chunk=20000):
+        # To have k-values in a lot of points, we can calculate the eigenvalues in batches to avoid memory issues
+        k_arr = np.asarray(k_arr, float)
+        R = np.array(list(self.H_R_up.keys()))                     # (M, 3) en Å
+        HR = [np.array(list(d.values())).reshape(len(R), -1)       # (M, 81)
+              for d in (self.H_R_up, self.H_R_dn)]
+        out = [np.empty((len(k_arr), 9)), np.empty((len(k_arr), 9))]
+        for s in range(0, len(k_arr), chunk):
+            ph = np.exp(1j * k_arr[s:s + chunk] @ R.T)             # (n, M)
+            for sp in (0, 1):
+                Hk = self.H_on_site[sp] + (ph @ HR[sp]).reshape(-1, 9, 9)
+                out[sp][s:s + chunk] = np.linalg.eigvalsh(Hk)
+        return out[0], out[1]
+
 
 def fast_band_plot(energies_up, energies_dn, k_path, k_points):
     import matplotlib.pyplot as plt
